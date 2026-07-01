@@ -189,19 +189,17 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
   }, []);
 
   useEffect(() => {
-    if (activeCorner !== null) {
-      window.addEventListener('mousemove', handlePointerMove, { passive: false });
-      window.addEventListener('touchmove', handlePointerMove, { passive: false });
-      window.addEventListener('mouseup', handlePointerUp);
-      window.addEventListener('touchend', handlePointerUp);
-      
-      return () => {
-        window.removeEventListener('mousemove', handlePointerMove);
-        window.removeEventListener('touchmove', handlePointerMove);
-        window.removeEventListener('mouseup', handlePointerUp);
-        window.removeEventListener('touchend', handlePointerUp);
-      };
-    }
+    if (activeCorner === null) return;
+    window.addEventListener('mousemove', handlePointerMove, { passive: false });
+    window.addEventListener('touchmove', handlePointerMove, { passive: false });
+    window.addEventListener('mouseup', handlePointerUp);
+    window.addEventListener('touchend', handlePointerUp);
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchend', handlePointerUp);
+    };
   }, [activeCorner, handlePointerMove, handlePointerUp]);
 
   const handleApply = () => {

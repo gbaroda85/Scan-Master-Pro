@@ -123,28 +123,18 @@ export default function Capture() {
       // Auto-crop
       const croppedUrl = await applyPerspectiveTransform(canvas, corners);
       
-      // Default filter
-      const filterCanvas = document.createElement('canvas');
-      const croppedImg = new Image();
-      croppedImg.src = croppedUrl;
-      await new Promise(r => croppedImg.onload = r);
-      filterCanvas.width = croppedImg.width;
-      filterCanvas.height = croppedImg.height;
-      const fCtx = filterCanvas.getContext('2d')!;
-      fCtx.drawImage(croppedImg, 0, 0);
-      
       const { applyFilter } = await import('../lib/filters');
-      applyFilter(filterCanvas, 'magic', 0, 0);
-      const filteredUrl = filterCanvas.toDataURL('image/jpeg', 0.9);
+      const filteredUrl = await applyFilter(croppedUrl, 'document', { brightness: 100, contrast: 100, rotation: 0 });
 
       const page: ScannedPage = {
         id: uuidv4(),
         originalDataUrl: dataUrl,
         croppedDataUrl: croppedUrl,
         filteredDataUrl: filteredUrl,
-        filter: 'magic',
-        brightness: 0,
-        contrast: 0,
+        filter: 'document',
+        brightness: 100,
+        contrast: 100,
+        rotation: 0,
         corners
       };
 

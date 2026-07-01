@@ -6,7 +6,7 @@ export interface ScannedDocument {
   thumbnail: string;    // base64 dataURL of first page
 }
 
-export type FilterType = 'original' | 'magic' | 'bw' | 'grayscale';
+export type FilterType = 'original' | 'photo' | 'bw' | 'document' | 'magic';
 
 export interface ScannedPage {
   id: string;
@@ -14,8 +14,9 @@ export interface ScannedPage {
   croppedDataUrl: string;    // after perspective transform
   filteredDataUrl: string;   // after filter applied
   filter: FilterType;
-  brightness: number;        // -100 to 100
-  contrast: number;          // -100 to 100
+  brightness: number;        // 0 to 200 (default: 100)
+  contrast: number;          // 0 to 200 (default: 100)
+  rotation: number;          // 0, 90, 180, 270
   corners: Corner[];         // the 4 detected/adjusted corners
 }
 
