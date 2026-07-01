@@ -2,11 +2,20 @@ import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import { ScannedPage } from './types';
 
-// A4 dimensions in mm
 const A4_PORTRAIT_W = 210;
 const A4_PORTRAIT_H = 297;
 const A4_LANDSCAPE_W = 297;
 const A4_LANDSCAPE_H = 210;
+
+/** Safely converts a data URL to a Blob without using fetch() */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [meta, base64] = dataUrl.split(',');
+  const mime = meta.match(/:(.*?);/)?.[1] ?? 'image/jpeg';
+  const bytes = atob(base64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
 
 function getImageDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
@@ -17,18 +26,18 @@ function getImageDimensions(dataUrl: string): Promise<{ width: number; height: n
   });
 }
 
-export async function exportToPDF(pages: ScannedPage[], filename = 'document.pdf'): Promise<void> {
-  const blob = await generatePDFBlob(pages);
+function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export async function generatePDFBlob(pages: ScannedPage[]): Promise<Blob> {
-  // Use the first page's orientation to initialise the PDF
   const firstDims = await getImageDimensions(pages[0].filteredDataUrl);
   const firstIsLandscape = firstDims.width > firstDims.height;
 
@@ -49,7 +58,7 @@ export async function generatePDFBlob(pages: ScannedPage[]): Promise<Blob> {
     const W = isLandscape ? A4_LANDSCAPE_W : A4_PORTRAIT_W;
     const H = isLandscape ? A4_LANDSCAPE_H : A4_PORTRAIT_H;
 
-    // Scale image to fill the page while maintaining aspect ratio
+    // Fit image to page preserving aspect ratio
     const imgRatio = dims.width / dims.height;
     const pageRatio = W / H;
     let imgW = W;
@@ -68,6 +77,11 @@ export async function generatePDFBlob(pages: ScannedPage[]): Promise<Blob> {
   return pdf.output('blob');
 }
 
+export async function exportToPDF(pages: ScannedPage[], filename = 'document.pdf'): Promise<void> {
+  const blob = await generatePDFBlob(pages);
+  triggerDownload(blob, filename);
+}
+
 export async function exportToZip(pages: ScannedPage[], filename = 'scans.zip'): Promise<void> {
   const zip = new JSZip();
   pages.forEach((page, i) => {
@@ -75,42 +89,44 @@ export async function exportToZip(pages: ScannedPage[], filename = 'scans.zip'):
     zip.file(`page_${i + 1}.jpg`, base64, { base64: true });
   });
   const blob = await zip.generateAsync({ type: 'blob' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  triggerDownload(blob, filename);
 }
 
-export async function shareAsImages(pages: ScannedPage[], docName: string): Promise<void> {
-  const files: File[] = await Promise.all(
-    pages.map(async (page, i) => {
-      const res = await fetch(page.filteredDataUrl);
-      const blob = await res.blob();
-      return new File([blob], `${docName}_page_${i + 1}.jpg`, { type: 'image/jpeg' });
-    })
-  );
-
-  if (typeof navigator !== 'undefined' && navigator.canShare?.({ files })) {
-    await navigator.share({ files, title: docName });
-  } else {
-    // Fallback: download each image individually
-    for (const file of files) {
-      const url = URL.createObjectURL(file);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = file.name;
-      a.click();
-      URL.revokeObjectURL(url);
-      await new Promise((r) => setTimeout(r, 200));
+/** Share PDF via Web Share API, download as fallback */
+export async function sharePDF(pages: ScannedPage[], docName: string): Promise<void> {
+  const blob = await generatePDFBlob(pages);
+  const file = new File([blob], `${docName}.pdf`, { type: 'application/pdf' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: docName });
+      return;
     }
+  } catch {
+    // fall through to download
   }
+  triggerDownload(blob, `${docName}.pdf`);
 }
 
-export async function downloadSingleImage(page: ScannedPage, name: string): Promise<void> {
-  const a = document.createElement('a');
-  a.href = page.filteredDataUrl;
-  a.download = `${name}.jpg`;
-  a.click();
+/** Share images via Web Share API, download individually as fallback */
+export async function shareAsImages(pages: ScannedPage[], docName: string): Promise<void> {
+  // Convert data URLs using atob — never use fetch() on data URLs
+  const files = pages.map((page, i) => {
+    const blob = dataUrlToBlob(page.filteredDataUrl);
+    return new File([blob], `${docName}_page_${i + 1}.jpg`, { type: 'image/jpeg' });
+  });
+
+  try {
+    if (navigator.canShare?.({ files })) {
+      await navigator.share({ files, title: docName });
+      return;
+    }
+  } catch {
+    // fall through to download
+  }
+
+  // Fallback: download each file one by one
+  for (const file of files) {
+    triggerDownload(file, file.name);
+    await new Promise((r) => setTimeout(r, 300));
+  }
 }

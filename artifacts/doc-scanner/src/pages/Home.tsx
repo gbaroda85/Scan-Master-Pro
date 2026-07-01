@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog';
 import { ScannedDocument } from '../lib/types';
-import { exportToPDF, exportToZip, shareAsImages } from '../lib/pdf';
+import { exportToPDF, exportToZip, shareAsImages, sharePDF } from '../lib/pdf';
 import { useToast } from '../hooks/use-toast';
 import { cn } from '../lib/utils';
 
@@ -98,18 +98,12 @@ export default function Home() {
 
   const handleShare = async (doc: ScannedDocument) => {
     try {
-      const { generatePDFBlob } = await import('../lib/pdf');
-      const pdf = await generatePDFBlob(doc.pages);
-      const file = new File([pdf], `${doc.name}.pdf`, { type: 'application/pdf' });
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: doc.name });
-      } else {
-        await exportToPDF(doc.pages, `${doc.name}.pdf`);
-        toast({ title: 'PDF downloaded' });
-      }
+      toast({ title: 'Preparing PDF…' });
+      await sharePDF(doc.pages, doc.name);
     } catch (err) {
       console.error(err);
-      toast({ title: 'Share failed', variant: 'destructive' });
+      toast({ title: 'Share failed — downloading instead', variant: 'destructive' });
+      try { await exportToPDF(doc.pages, `${doc.name}.pdf`); } catch { /* ignore */ }
     }
   };
 
