@@ -184,13 +184,13 @@ export default function Capture() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    // reset so same file can be re-selected
-    e.target.value = '';
+    const file = files[0]; // capture reference before resetting the input
+    e.target.value = '';   // reset so the same file can be re-selected later
     const reader = new FileReader();
     reader.onload = (ev) => {
       if (ev.target?.result) detectAndPreview(ev.target.result as string);
     };
-    reader.readAsDataURL(files[0]);
+    reader.readAsDataURL(file);
   };
 
   // ── Crop adjustment screen (full screen overlay) ──
