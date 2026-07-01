@@ -1,0 +1,56 @@
+Act as an Expert Full-Stack Web Developer and Computer Vision Specialist.
+Your task is to build a fully functional, production-ready web application that replicates the core features of "Clear Scanner" and "Oken Scanner". The app must be a Progressive Web App (PWA) capable of scanning documents, detecting edges, applying filters, and generating PDFs entirely on the client side without needing a backend server for image processing.
+​1. Tech Stack & Libraries Required:
+​Frontend Framework: React (Vite) or Next.js.
+​Styling: Tailwind CSS for a clean, mobile-first, modern UI.
+​Image Processing: opencv.js (for edge detection and perspective warping).
+​Canvas Manipulation: HTML5 Canvas API.
+​PDF Generation: jspdf (for converting scanned images to PDF).
+​OCR (Text Extraction): tesseract.js.
+​Storage: IndexedDB or localforage for saving multi-page documents locally.
+​Icons: Lucide React or FontAwesome.
+​2. Core Features & Logic to Implement:
+​A. Input Methods:
+​Camera Integration: Use getUserMedia API to open the device camera within the browser. Include buttons to switch between front/back cameras and capture a frame.
+​Gallery Upload: An input field to upload single or multiple images (JPEG/PNG) from local storage.
+​B. Auto Edge Detection & Cropping (The Most Important Feature):
+​When an image is captured/uploaded, feed it to opencv.js.
+​Apply Grayscale -> Gaussian Blur -> Canny Edge Detection.
+​Find the largest quadrilateral contour to automatically detect the document's boundaries.
+​Interactive Crop UI: Overlay a draggable 4-point polygon on the image over the detected corners. Include a "Magnifying Glass" effect when dragging a corner so the user can see exactly where the point is placed.
+​Perspective Transform: Once the user confirms the crop, use OpenCV's getPerspectiveTransform and warpPerspective to flatten and straighten the cropped document.
+​C. Image Enhancement & Filters:
+​Implement a bottom toolbar with the following filter options to apply on the cropped canvas:
+​Original: No changes.
+​Magic Color: Enhance saturation, brightness, and contrast to make text pop and background white.
+​Black & White (Document Mode): Extreme thresholding to make the background perfectly white and text jet black (like a photocopy).
+​Grayscale: Standard black and white without extreme thresholding.
+​Include sliders for manual Brightness and Contrast adjustments.
+​D. Multi-Page Document Management:
+​Allow users to add multiple pages to a single "Document Session".
+​Display a horizontally scrollable strip or grid of thumbnails at the bottom showing scanned pages.
+​Allow drag-and-drop reordering of pages.
+​Allow deleting or retaking a specific page.
+​E. Export & Share:
+​Generate PDF: Combine all enhanced pages using jspdf. Ensure A4 page size standardization.
+​Save as Image: Option to download pages as a ZIP of JPEGs or individual JPEGs.
+​Share API: Use the Web Share API (navigator.share) to share the generated PDF directly to WhatsApp, Email, etc.
+​F. OCR (Optical Character Recognition):
+​Add a "Recognize Text" button.
+​Pass the enhanced image to tesseract.js to extract text.
+​Display the extracted text in a modal with a "Copy to Clipboard" button.
+​3. UI/UX & Layout Structure:
+​Home Screen: A dashboard listing previously scanned documents (saved in IndexedDB) with a Grid/List toggle. A prominent floating Action Button (FAB) at the bottom center with a Camera icon to start a new scan.
+​Capture Screen: Full-screen camera view with a shutter button, gallery icon, and flash toggle.
+​Edit Screen: The core workspace.
+​Header: "Done" and "Back" buttons.
+​Center: The image canvas.
+​Footer: Tabs for "Crop", "Filters", "Adjust", and "Rotate/Flip".
+​4. Step-by-Step Execution Plan (Please write the code modularly):
+​Step 1: Setup the project, install dependencies, and configure Tailwind.
+​Step 2: Build the UI layouts (Home, Camera, Editor).
+​Step 3: Implement the Camera capture and File upload logic.
+​Step 4: Integrate OpenCV.js for edge detection and perspective cropping. Provide the exact logic for draggable corners.
+​Step 5: Build the canvas filters (Magic Color, B&W).
+​Step 6: Implement PDF generation and local storage.
+​Please provide the complete, modular codebase for this application. Ensure the OpenCV logic for cropping and flattening is highly accurate.

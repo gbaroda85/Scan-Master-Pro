@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "DocScan — Document Scanner PWA"
+version = "1.0.0"
+id = "artifacts/doc-scanner"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24083
+
+[services.development]
+run = "pnpm --filter @workspace/doc-scanner run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/doc-scanner", "run", "build" ]
+publicDir = "artifacts/doc-scanner/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24083"
+BASE_PATH = "/"
