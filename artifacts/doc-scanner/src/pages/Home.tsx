@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { DocumentCard } from '../components/DocumentCard';
 import { FAB } from '../components/FAB';
+import { PinModal } from '../components/PinModal';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import {
@@ -13,6 +14,7 @@ import {
 } from '../components/ui/dialog';
 import { ScannedDocument } from '../lib/types';
 import { exportToPDF, exportToZip, shareAsImages, sharePDF } from '../lib/pdf';
+import { hashPin, verifyPin } from '../lib/pin';
 import { useToast } from '../hooks/use-toast';
 import { cn } from '../lib/utils';
 
@@ -24,6 +26,8 @@ type DialogMode =
   | { kind: 'rename-folder'; name: string }
   | null;
 
+type PendingAction = (doc: ScannedDocument) => void;
+
 export default function Home() {
   const { state, refreshDocuments, dispatch, mergeDocuments, moveToFolder, renameFolder, deleteFolder } =
     useAppContext();
@@ -31,17 +35,22 @@ export default function Home() {
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [search, setSearch] = useState('');
-  const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = "All"
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [inputValue, setInputValue] = useState('');
 
+  // PIN modal state
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [pinModalMode, setPinModalMode] = useState<'set' | 'verify' | 'remove'>('set');
+  const [pinTargetDoc, setPinTargetDoc] = useState<ScannedDocument | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+
   useEffect(() => {
     refreshDocuments();
   }, []);
 
-  // Derive folders from all documents
   const folders = useMemo(() => {
     const set = new Set<string>();
     state.documents.forEach((d) => { if (d.folder) set.add(d.folder); });
@@ -57,24 +66,102 @@ export default function Home() {
   }, [state.documents, search, activeFolder]);
 
   const toggleSelect = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   };
 
-  const exitSelectionMode = () => {
-    setSelectionMode(false);
-    setSelectedIds([]);
+  const exitSelectionMode = () => { setSelectionMode(false); setSelectedIds([]); };
+
+  // --- PIN helpers ---
+
+  const requirePin = (doc: ScannedDocument, action: PendingAction) => {
+    if (!doc.pinHash) {
+      action(doc);
+      return;
+    }
+    setPinTargetDoc(doc);
+    setPendingAction(() => action);
+    setPinModalMode('verify');
+    setPinModalOpen(true);
   };
 
-  // --- Actions ---
+  const handlePinSuccess = async (pin: string) => {
+    if (!pinTargetDoc) return;
+
+    if (pinModalMode === 'set') {
+      // Save hashed PIN to document
+      const pinHash = await hashPin(pin);
+      const updated = { ...pinTargetDoc, pinHash };
+      const { saveDocument } = await import('../lib/storage');
+      await saveDocument(updated);
+      dispatch({ type: 'UPDATE_DOCUMENT', payload: updated });
+      toast({ title: 'Document locked with PIN' });
+      setPinModalOpen(false);
+      setPinTargetDoc(null);
+      return;
+    }
+
+    if (pinModalMode === 'remove') {
+      // Verify then remove PIN
+      const ok = await verifyPin(pin, pinTargetDoc.pinHash!);
+      if (!ok) {
+        toast({ title: 'Incorrect PIN', variant: 'destructive' });
+        setPinModalOpen(false);
+        return;
+      }
+      const updated = { ...pinTargetDoc, pinHash: undefined };
+      const { saveDocument } = await import('../lib/storage');
+      await saveDocument(updated);
+      dispatch({ type: 'UPDATE_DOCUMENT', payload: updated });
+      toast({ title: 'Lock removed' });
+      setPinModalOpen(false);
+      setPinTargetDoc(null);
+      return;
+    }
+
+    // verify mode — run the pending action
+    const ok = await verifyPin(pin, pinTargetDoc.pinHash!);
+    if (!ok) {
+      toast({ title: 'Incorrect PIN', variant: 'destructive' });
+      setPinModalOpen(false);
+      return;
+    }
+    setPinModalOpen(false);
+    if (pendingAction) {
+      pendingAction(pinTargetDoc);
+      setPendingAction(null);
+    }
+    setPinTargetDoc(null);
+  };
+
+  const handlePinCancel = () => {
+    setPinModalOpen(false);
+    setPinTargetDoc(null);
+    setPendingAction(null);
+  };
+
+  const handleLock = (doc: ScannedDocument) => {
+    setPinTargetDoc(doc);
+    setPinModalMode('set');
+    setPinModalOpen(true);
+  };
+
+  const handleUnlock = (doc: ScannedDocument) => {
+    setPinTargetDoc(doc);
+    setPinModalMode('remove');
+    setPinModalOpen(true);
+  };
+
+  // --- Document actions (PIN-gated where applicable) ---
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this document?')) return;
-    const { deleteDocument } = await import('../lib/storage');
-    await deleteDocument(id);
-    dispatch({ type: 'DELETE_DOCUMENT', payload: id });
-    toast({ title: 'Document deleted' });
+    const doc = state.documents.find((d) => d.id === id)!;
+    requirePin(doc, async () => {
+      if (!confirm('Delete this document?')) return;
+      const { deleteDocument } = await import('../lib/storage');
+      await deleteDocument(id);
+      dispatch({ type: 'DELETE_DOCUMENT', payload: id });
+      toast({ title: 'Document deleted' });
+    });
   };
 
   const handleDeleteSelected = async () => {
@@ -96,35 +183,43 @@ export default function Home() {
     setDialogMode(null);
   };
 
-  const handleShare = async (doc: ScannedDocument) => {
-    try {
-      toast({ title: 'Preparing PDF…' });
-      await sharePDF(doc.pages, doc.name);
-    } catch (err) {
-      console.error(err);
-      toast({ title: 'Share failed — downloading instead', variant: 'destructive' });
-      try { await exportToPDF(doc.pages, `${doc.name}.pdf`); } catch { /* ignore */ }
-    }
+  const handleShare = (doc: ScannedDocument) => {
+    requirePin(doc, async (d) => {
+      try {
+        toast({ title: 'Preparing PDF…' });
+        await sharePDF(d.pages, d.name);
+      } catch (err) {
+        console.error(err);
+        toast({ title: 'Share failed — downloading instead', variant: 'destructive' });
+        try { await exportToPDF(d.pages, `${d.name}.pdf`); } catch { /* ignore */ }
+      }
+    });
   };
 
-  const handleShareAsImage = async (doc: ScannedDocument) => {
-    try {
-      toast({ title: 'Preparing images…' });
-      await shareAsImages(doc.pages, doc.name);
-    } catch (err) {
-      console.error(err);
-      toast({ title: 'Image export failed', variant: 'destructive' });
-    }
+  const handleShareAsImage = (doc: ScannedDocument) => {
+    requirePin(doc, async (d) => {
+      try {
+        toast({ title: 'Preparing images…' });
+        await shareAsImages(d.pages, d.name);
+      } catch (err) {
+        console.error(err);
+        toast({ title: 'Image export failed', variant: 'destructive' });
+      }
+    });
   };
 
-  const handleExportZip = async (doc: ScannedDocument) => {
-    toast({ title: 'Generating ZIP…' });
-    await exportToZip(doc.pages, `${doc.name}.zip`);
+  const handleExportZip = (doc: ScannedDocument) => {
+    requirePin(doc, async (d) => {
+      toast({ title: 'Generating ZIP…' });
+      await exportToZip(d.pages, `${d.name}.zip`);
+    });
   };
 
-  const handleExportPdf = async (doc: ScannedDocument) => {
-    toast({ title: 'Generating PDF…' });
-    await exportToPDF(doc.pages, `${doc.name}.pdf`);
+  const handleExportPdf = (doc: ScannedDocument) => {
+    requirePin(doc, async (d) => {
+      toast({ title: 'Generating PDF…' });
+      await exportToPDF(d.pages, `${d.name}.pdf`);
+    });
   };
 
   const handleMergeSubmit = async () => {
@@ -142,8 +237,6 @@ export default function Home() {
       await moveToFolder(pendingDoc, name);
       toast({ title: `Moved to "${name}"` });
     } else {
-      // Create an empty folder by just switching to it — folders are derived from docs
-      // so show a toast explaining the user should move a doc into it
       toast({ title: `Folder "${name}" will appear when a document is moved into it.` });
     }
     setDialogMode(null);
@@ -189,15 +282,11 @@ export default function Home() {
               <Button variant="ghost" size="sm" onClick={exitSelectionMode} className="text-muted-foreground">
                 <X className="w-4 h-4 mr-1" /> Cancel
               </Button>
-              <span className="font-semibold text-sm">
-                {selectedIds.length} selected
-              </span>
+              <span className="font-semibold text-sm">{selectedIds.length} selected</span>
               <div className="flex items-center gap-1">
                 {selectedIds.length >= 2 && (
                   <Button
-                    size="sm"
-                    variant="outline"
-                    data-testid="btn-merge"
+                    size="sm" variant="outline" data-testid="btn-merge"
                     onClick={() => { setInputValue('Merged Document'); setDialogMode({ kind: 'merge' }); }}
                     className="text-xs"
                   >
@@ -206,11 +295,8 @@ export default function Home() {
                 )}
                 {selectedIds.length > 0 && (
                   <Button
-                    size="sm"
-                    variant="destructive"
-                    data-testid="btn-delete-selected"
-                    onClick={handleDeleteSelected}
-                    className="text-xs"
+                    size="sm" variant="destructive" data-testid="btn-delete-selected"
+                    onClick={handleDeleteSelected} className="text-xs"
                   >
                     <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
                   </Button>
@@ -224,22 +310,16 @@ export default function Home() {
               </h1>
               <div className="flex items-center gap-1">
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground"
-                  data-testid="btn-new-folder"
-                  title="New Folder"
+                  variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"
+                  data-testid="btn-new-folder" title="New Folder"
                   onClick={() => { setInputValue(''); setDialogMode({ kind: 'new-folder' }); }}
                 >
                   <FolderPlus className="w-4 h-4" />
                 </Button>
                 {state.documents.length > 0 && (
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground"
-                    data-testid="btn-select-mode"
-                    title="Select"
+                    variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"
+                    data-testid="btn-select-mode" title="Select"
                     onClick={() => setSelectionMode(true)}
                   >
                     <CheckSquare className="w-4 h-4" />
@@ -279,16 +359,12 @@ export default function Home() {
         {folders.length > 0 && (
           <div className="flex gap-1.5 px-4 pb-2 overflow-x-auto no-scrollbar">
             <FolderTab
-              label="All"
-              active={activeFolder === null}
-              count={state.documents.length}
-              onClick={() => setActiveFolder(null)}
+              label="All" active={activeFolder === null}
+              count={state.documents.length} onClick={() => setActiveFolder(null)}
             />
             {folders.map((f) => (
               <FolderTab
-                key={f}
-                label={f}
-                active={activeFolder === f}
+                key={f} label={f} active={activeFolder === f}
                 count={state.documents.filter((d) => d.folder === f).length}
                 onClick={() => setActiveFolder(f)}
                 onRename={() => { setInputValue(f); setDialogMode({ kind: 'rename-folder', name: f }); }}
@@ -325,6 +401,8 @@ export default function Home() {
                 onExportPdf={handleExportPdf}
                 onMoveToFolder={moveToFolder}
                 onCreateFolderAndMove={(d) => { setInputValue(''); setDialogMode({ kind: 'move-to-folder', doc: d }); }}
+                onLock={handleLock}
+                onUnlock={handleUnlock}
                 onToggleSelect={toggleSelect}
               />
             ))}
@@ -334,6 +412,14 @@ export default function Home() {
 
       {!selectionMode && <FAB />}
 
+      {/* PIN Modal */}
+      <PinModal
+        open={pinModalOpen}
+        mode={pinModalMode}
+        onSuccess={handlePinSuccess}
+        onCancel={handlePinCancel}
+      />
+
       {/* ── Dialogs ── */}
 
       {/* Rename Document */}
@@ -341,7 +427,8 @@ export default function Home() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Rename Document</DialogTitle></DialogHeader>
           <div className="py-4">
-            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleRenameSubmit()} />
+            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleRenameSubmit()} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogMode(null)}>Cancel</Button>
@@ -358,7 +445,8 @@ export default function Home() {
             Pages from all selected documents will be combined in the order they were selected. Give the merged document a name:
           </p>
           <div className="py-2">
-            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus placeholder="Merged document name" onKeyDown={(e) => e.key === 'Enter' && handleMergeSubmit()} />
+            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus
+              placeholder="Merged document name" onKeyDown={(e) => e.key === 'Enter' && handleMergeSubmit()} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogMode(null)}>Cancel</Button>
@@ -374,7 +462,8 @@ export default function Home() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>New Folder</DialogTitle></DialogHeader>
           <div className="py-4">
-            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus placeholder="Folder name" onKeyDown={(e) => e.key === 'Enter' && handleNewFolderSubmit()} />
+            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus
+              placeholder="Folder name" onKeyDown={(e) => e.key === 'Enter' && handleNewFolderSubmit()} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogMode(null)}>Cancel</Button>
@@ -390,7 +479,8 @@ export default function Home() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>New Folder</DialogTitle></DialogHeader>
           <div className="py-4">
-            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus placeholder="Folder name" onKeyDown={(e) => e.key === 'Enter' && handleMoveToFolderSubmit()} />
+            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus
+              placeholder="Folder name" onKeyDown={(e) => e.key === 'Enter' && handleMoveToFolderSubmit()} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogMode(null)}>Cancel</Button>
@@ -406,7 +496,8 @@ export default function Home() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Rename Folder</DialogTitle></DialogHeader>
           <div className="py-4">
-            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleRenameFolderSubmit()} />
+            <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleRenameFolderSubmit()} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogMode(null)}>Cancel</Button>
@@ -423,12 +514,8 @@ export default function Home() {
 function FolderTab({
   label, active, count, onClick, onRename, onDelete,
 }: {
-  label: string;
-  active: boolean;
-  count: number;
-  onClick: () => void;
-  onRename?: () => void;
-  onDelete?: () => void;
+  label: string; active: boolean; count: number;
+  onClick: () => void; onRename?: () => void; onDelete?: () => void;
 }) {
   return (
     <div className="relative group flex-shrink-0">
@@ -445,7 +532,6 @@ function FolderTab({
         {label}
         <span className={cn('text-[10px] rounded-full px-1', active ? 'bg-white/20' : 'bg-muted')}>{count}</span>
       </button>
-      {/* Rename / delete for named folders (on long hover) */}
       {onRename && onDelete && (
         <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5 z-10">
           <button

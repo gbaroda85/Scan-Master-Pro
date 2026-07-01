@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { useAppContext } from '../context/AppContext';
 import { Button } from '../components/ui/button';
-import { ChevronLeft, Check, Crop, Type, Loader2 } from 'lucide-react';
+import { ChevronLeft, Check, Crop, Type, Loader2, Stamp } from 'lucide-react';
 import { PageStrip } from '../components/PageStrip';
 import { FilterBar } from '../components/FilterBar';
 import { CropCanvas } from '../components/CropCanvas';
 import { OCRModal } from '../components/OCRModal';
-import { FilterType } from '../lib/types';
+import { WatermarkModal } from '../components/WatermarkModal';
+import { FilterType, WatermarkSettings } from '../lib/types';
 import { useToast } from '../hooks/use-toast';
 
 export default function Editor() {
@@ -17,6 +18,7 @@ export default function Editor() {
 
   const [isCropping, setIsCropping] = useState(false);
   const [ocrOpen, setOcrOpen] = useState(false);
+  const [watermarkOpen, setWatermarkOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'filter' | 'adjust' | 'rotate'>('filter');
 
@@ -24,9 +26,7 @@ export default function Editor() {
   const currentPage = currentSession[currentPageIndex];
 
   useEffect(() => {
-    if (currentSession.length === 0 && !isSaving) {
-      setLocation('/');
-    }
+    if (currentSession.length === 0 && !isSaving) setLocation('/');
   }, [currentSession.length, isSaving]);
 
   if (!currentPage) return null;
@@ -60,25 +60,17 @@ export default function Editor() {
     setIsCropping(false);
     try {
       const { applyPerspectiveTransform } = await import('../lib/opencv');
-
       const img = new Image();
       img.src = currentPage.originalDataUrl;
       await new Promise((r) => (img.onload = r));
-
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
       canvas.height = img.height;
       canvas.getContext('2d')!.drawImage(img, 0, 0);
-
       const croppedUrl = await applyPerspectiveTransform(canvas, corners);
       const filteredUrl = await reapplyFilter(
-        croppedUrl,
-        currentPage.filter,
-        currentPage.brightness,
-        currentPage.contrast,
-        currentPage.rotation
+        croppedUrl, currentPage.filter, currentPage.brightness, currentPage.contrast, currentPage.rotation
       );
-
       dispatch({
         type: 'UPDATE_PAGE',
         payload: {
@@ -93,18 +85,11 @@ export default function Editor() {
   };
 
   const handleUpdateFilter = async (
-    filter: FilterType,
-    brightness: number,
-    contrast: number,
-    rotation: number
+    filter: FilterType, brightness: number, contrast: number, rotation: number
   ) => {
     try {
       const filteredUrl = await reapplyFilter(
-        currentPage.croppedDataUrl,
-        filter,
-        brightness,
-        contrast,
-        rotation
+        currentPage.croppedDataUrl, filter, brightness, contrast, rotation
       );
       dispatch({
         type: 'UPDATE_PAGE',
@@ -115,6 +100,30 @@ export default function Editor() {
       });
     } catch (err) {
       console.error('Filter error', err);
+    }
+  };
+
+  const handleApplyWatermark = async (settings: WatermarkSettings) => {
+    setWatermarkOpen(false);
+    toast({ title: 'Applying watermark…' });
+    try {
+      const { applyWatermark } = await import('../lib/watermark');
+      // Apply to every page in the session
+      for (let i = 0; i < currentSession.length; i++) {
+        const page = currentSession[i];
+        const watermarked = await applyWatermark(page.filteredDataUrl, settings);
+        dispatch({
+          type: 'UPDATE_PAGE',
+          payload: {
+            index: i,
+            page: { ...page, filteredDataUrl: watermarked },
+          },
+        });
+      }
+      toast({ title: `Watermark applied to ${currentSession.length} page(s)` });
+    } catch (err) {
+      console.error('Watermark error', err);
+      toast({ title: 'Failed to apply watermark', variant: 'destructive' });
     }
   };
 
@@ -163,6 +172,7 @@ export default function Editor() {
             variant="secondary"
             size="icon"
             data-testid="btn-crop"
+            title="Crop / Adjust corners"
             className="w-10 h-10 rounded-full shadow-md bg-background text-foreground"
             onClick={() => setIsCropping(true)}
           >
@@ -171,7 +181,18 @@ export default function Editor() {
           <Button
             variant="secondary"
             size="icon"
+            data-testid="btn-watermark"
+            title="Add Watermark"
+            className="w-10 h-10 rounded-full shadow-md bg-background text-foreground"
+            onClick={() => setWatermarkOpen(true)}
+          >
+            <Stamp className="w-5 h-5" />
+          </Button>
+          <Button
+            variant="secondary"
+            size="icon"
             data-testid="btn-ocr"
+            title="Recognize Text (OCR)"
             className="w-10 h-10 rounded-full shadow-md bg-background text-foreground"
             onClick={() => setOcrOpen(true)}
           >
@@ -202,7 +223,6 @@ export default function Editor() {
             handleUpdateFilter(currentPage.filter, currentPage.brightness, currentPage.contrast, deg)
           }
         />
-
         <PageStrip
           pages={currentSession}
           currentIndex={currentPageIndex}
@@ -212,7 +232,7 @@ export default function Editor() {
         />
       </div>
 
-      {/* Fullscreen Crop Mode */}
+      {/* Crop overlay */}
       {isCropping && (
         <CropCanvas
           imageSrc={currentPage.originalDataUrl}
@@ -222,7 +242,16 @@ export default function Editor() {
         />
       )}
 
+      {/* OCR Modal */}
       <OCRModal open={ocrOpen} onOpenChange={setOcrOpen} imageUrl={currentPage.filteredDataUrl} />
+
+      {/* Watermark Modal */}
+      <WatermarkModal
+        open={watermarkOpen}
+        previewImageUrl={currentPage.filteredDataUrl}
+        onApply={handleApplyWatermark}
+        onCancel={() => setWatermarkOpen(false)}
+      />
     </div>
   );
 }

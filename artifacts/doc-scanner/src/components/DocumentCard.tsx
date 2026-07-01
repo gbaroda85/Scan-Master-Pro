@@ -3,7 +3,7 @@ import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import {
   MoreVertical, FileText, Image as ImageIcon, Trash2, Edit2, Share2,
-  Download, FolderOpen, Images, CheckCircle2, Circle,
+  Download, FolderOpen, Images, CheckCircle2, Circle, Lock, Unlock,
 } from 'lucide-react';
 import { ScannedDocument } from '../lib/types';
 import {
@@ -28,6 +28,8 @@ interface DocumentCardProps {
   onExportPdf: (doc: ScannedDocument) => void;
   onMoveToFolder: (doc: ScannedDocument, folder: string | undefined) => void;
   onCreateFolderAndMove: (doc: ScannedDocument) => void;
+  onLock: (doc: ScannedDocument) => void;
+  onUnlock: (doc: ScannedDocument) => void;
   onToggleSelect?: (id: string) => void;
 }
 
@@ -45,19 +47,21 @@ export function DocumentCard({
   onExportPdf,
   onMoveToFolder,
   onCreateFolderAndMove,
+  onLock,
+  onUnlock,
   onToggleSelect,
 }: DocumentCardProps) {
   const dateStr = format(new Date(document.createdAt), 'MMM d, yyyy h:mm a');
+  const isLocked = !!document.pinHash;
 
   const handleCardClick = () => {
-    if (selectionMode && onToggleSelect) {
-      onToggleSelect(document.id);
-    }
+    if (selectionMode && onToggleSelect) onToggleSelect(document.id);
   };
 
   const menuProps = {
     doc: document,
     folders,
+    isLocked,
     onDelete: () => onDelete(document.id),
     onRename: () => onRename(document),
     onShare: () => onShare(document),
@@ -66,6 +70,8 @@ export function DocumentCard({
     onExportPdf: () => onExportPdf(document),
     onMoveToFolder: (folder: string | undefined) => onMoveToFolder(document, folder),
     onCreateFolderAndMove: () => onCreateFolderAndMove(document),
+    onLock: () => onLock(document),
+    onUnlock: () => onUnlock(document),
   };
 
   if (viewMode === 'list') {
@@ -85,6 +91,11 @@ export function DocumentCard({
             ) : (
               <ImageIcon className="text-muted-foreground w-8 h-8" />
             )}
+            {isLocked && !selectionMode && (
+              <div className="absolute bottom-1 right-1 bg-amber-500 text-white rounded-full p-0.5">
+                <Lock className="w-3 h-3" />
+              </div>
+            )}
             {selectionMode && (
               <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
                 {selected
@@ -94,7 +105,10 @@ export function DocumentCard({
             )}
           </div>
           <div className="p-4 flex-1 min-w-0">
-            <h3 className="font-semibold text-base truncate">{document.name}</h3>
+            <div className="flex items-center gap-1.5">
+              <h3 className="font-semibold text-base truncate">{document.name}</h3>
+              {isLocked && <Lock className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />}
+            </div>
             <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
               <FileText className="w-3 h-3" />
               {document.pages.length} page{document.pages.length !== 1 && 's'}
@@ -133,6 +147,14 @@ export function DocumentCard({
         ) : (
           <ImageIcon className="text-muted-foreground w-12 h-12" />
         )}
+
+        {/* Lock badge */}
+        {isLocked && !selectionMode && (
+          <div className="absolute top-2 left-2 bg-amber-500 text-white rounded-full p-1 shadow-md">
+            <Lock className="w-3.5 h-3.5" />
+          </div>
+        )}
+
         {selectionMode ? (
           <div className="absolute inset-0 bg-black/30 flex items-start justify-end p-2">
             {selected
@@ -144,6 +166,7 @@ export function DocumentCard({
             <DocMenu {...menuProps} variant="glass" />
           </div>
         )}
+
         {document.folder && !selectionMode && (
           <div className="absolute bottom-2 left-2 bg-black/50 text-white text-[10px] rounded px-1.5 py-0.5 flex items-center gap-1 backdrop-blur-sm">
             <FolderOpen className="w-2.5 h-2.5" />
@@ -151,9 +174,11 @@ export function DocumentCard({
           </div>
         )}
       </div>
+
       <CardContent className="p-3 flex-1 flex flex-col justify-between">
-        <h3 className="font-semibold text-sm truncate mb-1" title={document.name}>
+        <h3 className="font-semibold text-sm truncate mb-1 flex items-center gap-1" title={document.name}>
           {document.name}
+          {isLocked && <Lock className="w-3 h-3 text-amber-500 flex-shrink-0" />}
         </h3>
         <p className="text-xs text-muted-foreground flex justify-between items-center">
           <span>{document.pages.length} pg{document.pages.length !== 1 && 's'}</span>
@@ -165,15 +190,15 @@ export function DocumentCard({
 }
 
 function DocMenu({
-  doc,
-  folders,
+  doc, folders, isLocked,
   onDelete, onRename, onShare, onShareAsImage,
-  onExportZip, onExportPdf,
-  onMoveToFolder, onCreateFolderAndMove,
+  onExportZip, onExportPdf, onMoveToFolder, onCreateFolderAndMove,
+  onLock, onUnlock,
   variant = 'ghost',
 }: {
   doc: ScannedDocument;
   folders: string[];
+  isLocked: boolean;
   onDelete: () => void;
   onRename: () => void;
   onShare: () => void;
@@ -182,6 +207,8 @@ function DocMenu({
   onExportPdf: () => void;
   onMoveToFolder: (folder: string | undefined) => void;
   onCreateFolderAndMove: () => void;
+  onLock: () => void;
+  onUnlock: () => void;
   variant?: 'ghost' | 'glass';
 }) {
   return (
@@ -203,6 +230,17 @@ function DocMenu({
         <DropdownMenuItem onClick={onRename}>
           <Edit2 className="w-4 h-4 mr-2" /> Rename
         </DropdownMenuItem>
+
+        {/* Lock / Unlock */}
+        {isLocked ? (
+          <DropdownMenuItem onClick={onUnlock}>
+            <Unlock className="w-4 h-4 mr-2 text-amber-500" /> Remove Lock
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem onClick={onLock}>
+            <Lock className="w-4 h-4 mr-2" /> Lock with PIN
+          </DropdownMenuItem>
+        )}
 
         {/* Share sub-menu */}
         <DropdownMenuSub>
