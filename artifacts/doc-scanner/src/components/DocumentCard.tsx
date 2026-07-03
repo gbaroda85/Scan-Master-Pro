@@ -87,7 +87,7 @@ export function DocumentCard({
         <CardContent className="p-0 flex items-center">
           <div className="w-24 h-24 shrink-0 bg-muted border-r border-border relative overflow-hidden flex items-center justify-center">
             {document.thumbnail ? (
-              <img src={document.thumbnail} alt={document.name} className="w-full h-full object-cover" />
+              <img src={document.thumbnail} alt={document.name} className="w-full h-full object-contain" />
             ) : (
               <ImageIcon className="text-muted-foreground w-8 h-8" />
             )}
@@ -143,7 +143,7 @@ export function DocumentCard({
     >
       <div className="aspect-[3/4] w-full bg-muted relative overflow-hidden flex items-center justify-center border-b border-border">
         {document.thumbnail ? (
-          <img src={document.thumbnail} alt={document.name} className="w-full h-full object-cover" />
+          <img src={document.thumbnail} alt={document.name} className="w-full h-full object-contain" />
         ) : (
           <ImageIcon className="text-muted-foreground w-12 h-12" />
         )}
