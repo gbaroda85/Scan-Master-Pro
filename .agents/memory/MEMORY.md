@@ -1,0 +1,1 @@
+- [doc-scanner rotate/crop pipeline](doc-scanner-rotate-crop.md) — CropCanvas image rotation flow and orientation-mismatch heuristic for auto-rotate suggestions.

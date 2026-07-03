@@ -56,12 +56,12 @@ export default function Editor() {
     return applyFilter(croppedDataUrl, filter, { brightness, contrast, rotation });
   };
 
-  const handleApplyCrop = async (corners: { x: number; y: number }[]) => {
+  const handleApplyCrop = async (corners: { x: number; y: number }[], rotatedImageSrc: string) => {
     setIsCropping(false);
     try {
       const { applyPerspectiveTransform } = await import('../lib/opencv');
       const img = new Image();
-      img.src = currentPage.originalDataUrl;
+      img.src = rotatedImageSrc;
       await new Promise((r) => (img.onload = r));
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
@@ -75,7 +75,13 @@ export default function Editor() {
         type: 'UPDATE_PAGE',
         payload: {
           index: currentPageIndex,
-          page: { ...currentPage, corners, croppedDataUrl: croppedUrl, filteredDataUrl: filteredUrl },
+          page: {
+            ...currentPage,
+            corners,
+            originalDataUrl: rotatedImageSrc,
+            croppedDataUrl: croppedUrl,
+            filteredDataUrl: filteredUrl,
+          },
         },
       });
     } catch (err) {

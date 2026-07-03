@@ -1,17 +1,36 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Corner } from '../lib/types';
 import { Button } from './ui/button';
-import { Check, X } from 'lucide-react';
+import { Check, X, RotateCw } from 'lucide-react';
 
 interface CropCanvasProps {
   imageSrc: string;
   initialCorners: Corner[];
-  onApply: (corners: Corner[]) => void;
+  onApply: (corners: Corner[], rotatedImageSrc: string) => void;
   onCancel: () => void;
 }
 
 const CORNER_TOUCH_RADIUS = 28;
 const CORNER_VISUAL_RADIUS = 10;
+
+function rotateImageDataUrl(src: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalHeight;
+      canvas.height = img.naturalWidth;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('no 2d context'));
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      resolve(canvas.toDataURL('image/jpeg', 0.95));
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
 
 export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: CropCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -20,13 +39,16 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(new Image());
 
+  const [workingSrc, setWorkingSrc] = useState(imageSrc);
   const [corners, setCorners] = useState<Corner[]>(initialCorners);
   const [activeCorner, setActiveCorner] = useState<number | null>(null);
   const [displayScale, setDisplayScale] = useState({ x: 1, y: 1 });
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [showRotateSuggestion, setShowRotateSuggestion] = useState(false);
+  const [isRotating, setIsRotating] = useState(false);
 
-  const layoutRef = useRef<() => void>(() => {});
+  const suggestionCheckedRef = useRef(false);
 
   // Load image and set up canvas, reserving space so it never sits under the header/footer bars
   useEffect(() => {
@@ -50,8 +72,6 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
       const dh = ih * scale;
       const dpr = window.devicePixelRatio || 1;
 
-      // High-resolution backing store so the preview is crisp on retina screens,
-      // while CSS size stays at the (lower) display size.
       canvas.width = Math.round(dw * dpr);
       canvas.height = Math.round(dh * dpr);
       canvas.style.width = `${dw}px`;
@@ -60,36 +80,45 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
       const ox = (cw - dw) / 2;
       const oy = headerH + (chAvail - dh) / 2;
 
-      const prevScale = displayScale.x || 1;
-      setDisplayScale({ x: scale, y: scale });
-      setOffset({ x: ox, y: oy });
-
-      // Re-scale existing corners proportionally when re-laying out (e.g. rotate/resize)
-      setCorners((prev) => {
-        if (prev.length !== 4) return prev;
-        const ratio = scale / prevScale;
-        return prev.map((c) => ({ x: c.x * ratio, y: c.y * ratio }));
+      setDisplayScale((prevScaleState) => {
+        const ratio = scale / (prevScaleState.x || 1);
+        setCorners((prev) => (prev.length === 4 ? prev.map((c) => ({ x: c.x * ratio, y: c.y * ratio })) : prev));
+        return { x: scale, y: scale };
       });
+      setOffset({ x: ox, y: oy });
     };
 
-    layoutRef.current = layout;
-
-    img.src = imageSrc;
+    img.src = workingSrc;
     img.onload = () => {
-      if (initialCorners && initialCorners.length === 4) {
-        // Corners come in at natural-image scale; convert once we know the scale in layout()
-        const container = containerRef.current;
-        if (container) {
-          const headerH = headerRef.current?.offsetHeight ?? 0;
-          const footerH = footerRef.current?.offsetHeight ?? 0;
-          const cw = container.clientWidth;
-          const chAvail = Math.max(container.clientHeight - headerH - footerH, 50);
-          const scale = Math.min(cw / img.naturalWidth, chAvail / img.naturalHeight);
-          setCorners(initialCorners.map((c) => ({ x: c.x * scale, y: c.y * scale })));
-        }
-      } else {
-        setCorners([]);
+      const container = containerRef.current;
+      if (initialCorners && initialCorners.length === 4 && container) {
+        const headerH = headerRef.current?.offsetHeight ?? 0;
+        const footerH = footerRef.current?.offsetHeight ?? 0;
+        const cw = container.clientWidth;
+        const chAvail = Math.max(container.clientHeight - headerH - footerH, 50);
+        const scale = Math.min(cw / img.naturalWidth, chAvail / img.naturalHeight);
+        setCorners(initialCorners.map((c) => ({ x: c.x * scale, y: c.y * scale })));
+        setDisplayScale({ x: scale, y: scale });
       }
+
+      // Suggest a rotation only once, based on the very first (unrotated) image + detection.
+      if (!suggestionCheckedRef.current) {
+        suggestionCheckedRef.current = true;
+        if (initialCorners && initialCorners.length === 4) {
+          const xs = initialCorners.map((c) => c.x);
+          const ys = initialCorners.map((c) => c.y);
+          const quadW = Math.max(...xs) - Math.min(...xs);
+          const quadH = Math.max(...ys) - Math.min(...ys);
+          const imageIsLandscape = img.naturalWidth > img.naturalHeight;
+          const quadIsLandscape = quadW > quadH;
+          // Flag a likely-sideways capture: the photo's own orientation doesn't match
+          // the detected document shape (e.g. a portrait letter photographed in landscape mode).
+          if (imageIsLandscape !== quadIsLandscape) {
+            setShowRotateSuggestion(true);
+          }
+        }
+      }
+
       layout();
     };
 
@@ -100,7 +129,7 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
       window.removeEventListener('orientationchange', layout);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageSrc, initialCorners]);
+  }, [workingSrc, initialCorners]);
 
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -116,11 +145,8 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
     const cssH = canvas.height / dpr;
 
     ctx.clearRect(0, 0, cssW, cssH);
-
-    // Draw original image (coordinates are in CSS pixel space thanks to the transform above)
     ctx.drawImage(imgRef.current, 0, 0, cssW, cssH);
 
-    // Draw mask overlay outside the selection
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
     ctx.beginPath();
     ctx.rect(0, 0, cssW, cssH);
@@ -131,7 +157,6 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
     ctx.closePath();
     ctx.fill('evenodd');
 
-    // Draw connecting lines
     ctx.strokeStyle = '#7DA88B';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
@@ -142,17 +167,14 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
     ctx.closePath();
     ctx.stroke();
 
-    // Draw corners with a larger, more grabbable halo
     corners.forEach((corner, i) => {
       const isActive = i === activeCorner;
 
-      // Outer halo (visual affordance for the touch target)
       ctx.beginPath();
       ctx.arc(corner.x, corner.y, isActive ? 24 : 18, 0, Math.PI * 2);
       ctx.fillStyle = isActive ? 'rgba(125,168,139,0.35)' : 'rgba(255,255,255,0.25)';
       ctx.fill();
 
-      // Inner solid dot
       ctx.beginPath();
       ctx.arc(corner.x, corner.y, isActive ? CORNER_VISUAL_RADIUS + 2 : CORNER_VISUAL_RADIUS, 0, Math.PI * 2);
       ctx.fillStyle = isActive ? '#ffffff' : '#7DA88B';
@@ -182,7 +204,6 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
       clientY = (e as React.MouseEvent | MouseEvent).clientY;
     }
 
-    // rect.width/height are CSS pixels, matching our CSS-space corner coordinates
     return {
       x: clientX - rect.left,
       y: clientY - rect.top,
@@ -254,7 +275,33 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
       x: c.x / displayScale.x,
       y: c.y / displayScale.y,
     }));
-    onApply(originalScaleCorners);
+    onApply(originalScaleCorners, workingSrc);
+  };
+
+  const handleRotate = async () => {
+    if (isRotating) return;
+    setIsRotating(true);
+    setShowRotateSuggestion(false);
+    try {
+      const rotated = await rotateImageDataUrl(workingSrc);
+      setWorkingSrc(rotated);
+      // Reset to sensible default corners for the newly-rotated image; the old
+      // quadrilateral doesn't map cleanly across a 90° rotation.
+      const tmpImg = new Image();
+      tmpImg.onload = () => {
+        const m = 0.08;
+        setDisplayScale({ x: 1, y: 1 });
+        setCorners([
+          { x: tmpImg.naturalWidth * m, y: tmpImg.naturalHeight * m },
+          { x: tmpImg.naturalWidth * (1 - m), y: tmpImg.naturalHeight * m },
+          { x: tmpImg.naturalWidth * (1 - m), y: tmpImg.naturalHeight * (1 - m) },
+          { x: tmpImg.naturalWidth * m, y: tmpImg.naturalHeight * (1 - m) },
+        ]);
+      };
+      tmpImg.src = rotated;
+    } finally {
+      setIsRotating(false);
+    }
   };
 
   return (
@@ -267,10 +314,33 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
           <X className="w-6 h-6" />
         </Button>
         <span className="font-medium text-sm">Adjust Boundaries</span>
-        <Button variant="ghost" size="icon" onClick={handleApply} className="text-primary hover:bg-primary/20">
-          <Check className="w-6 h-6" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleRotate}
+            disabled={isRotating}
+            className="text-white hover:bg-white/20"
+            data-testid="btn-rotate"
+          >
+            <RotateCw className="w-5 h-5" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={handleApply} className="text-primary hover:bg-primary/20">
+            <Check className="w-6 h-6" />
+          </Button>
+        </div>
       </div>
+
+      {showRotateSuggestion && (
+        <button
+          onClick={handleRotate}
+          data-testid="btn-rotate-suggestion"
+          className="absolute top-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-primary text-primary-foreground text-xs font-semibold px-4 py-2 rounded-full shadow-lg active:scale-95 transition-transform"
+        >
+          <RotateCw className="w-3.5 h-3.5" />
+          This looks sideways — tap to rotate
+        </button>
+      )}
 
       <div
         ref={containerRef}
@@ -304,7 +374,7 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
                 transform: `scale(2) translate(${-(dragPos.x - 30)}px, ${-(dragPos.y - 30)}px)`,
               }}
             >
-              <img src={imageSrc} className="w-full h-full" alt="magnified view" />
+              <img src={workingSrc} className="w-full h-full" alt="magnified view" />
               <svg className="absolute inset-0 w-full h-full pointer-events-none">
                 <path
                   d={`M ${corners[0].x} ${corners[0].y} L ${corners[1].x} ${corners[1].y} L ${corners[2].x} ${corners[2].y} L ${corners[3].x} ${corners[3].y} Z`}
@@ -319,6 +389,12 @@ export function CropCanvas({ imageSrc, initialCorners, onApply, onCancel }: Crop
             <div className="absolute inset-0 rounded-full border border-white/20 shadow-inner"></div>
             <div className="absolute left-1/2 top-1/2 w-8 h-8 -ml-4 -mt-4 border border-white/50 rounded-full"></div>
             <div className="absolute left-1/2 top-1/2 w-1 h-1 -ml-0.5 -mt-0.5 bg-primary rounded-full"></div>
+          </div>
+        )}
+
+        {isRotating && (
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30">
+            <RotateCw className="w-8 h-8 text-white animate-spin" />
           </div>
         )}
       </div>

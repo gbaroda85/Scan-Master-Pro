@@ -121,8 +121,8 @@ export default function Capture() {
     }
   };
 
-  /** Step 2: user confirmed the crop corners → apply transform → go to editor */
-  const handleCropConfirm = async (corners: Corner[]) => {
+  /** Step 2: user confirmed the crop corners (and possibly rotated image) → apply transform → go to editor */
+  const handleCropConfirm = async (corners: Corner[], rotatedImageSrc: string) => {
     if (!cropPreview) return;
     setIsApplyingCrop(true);
     try {
@@ -130,7 +130,7 @@ export default function Capture() {
       const { applyFilter } = await import('../lib/filters');
 
       const img = new Image();
-      img.src = cropPreview.dataUrl;
+      img.src = rotatedImageSrc;
       await new Promise((r) => (img.onload = r));
 
       const canvas = document.createElement('canvas');
