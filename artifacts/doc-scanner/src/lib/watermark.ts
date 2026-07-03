@@ -95,8 +95,19 @@ export function drawWatermarkPreview(
   const img = new Image();
   img.onload = () => {
     const ctx = canvas.getContext('2d')!;
+
+    // Render at devicePixelRatio so the preview stays crisp on retina/high-DPI
+    // screens instead of being upscaled from a low-res backing store.
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = parseFloat(canvas.style.width || `${canvas.width}`);
+    const cssH = parseFloat(canvas.style.height || `${canvas.height}`);
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, cssW, cssH);
 
     // Scale settings for the preview canvas size
     const scaled: WatermarkSettings = {
@@ -104,7 +115,7 @@ export function drawWatermarkPreview(
       fontSize: Math.max(8, settings.fontSize * previewFontScale),
       margin: settings.margin * previewFontScale,
     };
-    drawWatermarkOnContext(ctx, canvas.width, canvas.height, scaled);
+    drawWatermarkOnContext(ctx, cssW, cssH, scaled);
   };
   img.src = previewImageUrl;
 }

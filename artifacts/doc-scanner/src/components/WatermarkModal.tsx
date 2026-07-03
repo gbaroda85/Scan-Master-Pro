@@ -72,11 +72,21 @@ export function WatermarkModal({ open, previewImageUrl, onApply, onCancel }: Wat
       if (!canvas) return;
       const maxW = 320;
       const scale = Math.min(1, maxW / img.naturalWidth);
-      canvas.width = img.naturalWidth * scale;
-      canvas.height = img.naturalHeight * scale;
+      const cssW = img.naturalWidth * scale;
+      const cssH = img.naturalHeight * scale;
+      const dpr = window.devicePixelRatio || 1;
+
+      // Backing store at devicePixelRatio resolution, CSS size stays at the
+      // (smaller) display size — keeps the live preview sharp on retina screens.
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
       previewScale.current = scale;
+      updatePreview();
     };
     img.src = previewImageUrl;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, previewImageUrl]);
 
   // Redraw whenever settings change
