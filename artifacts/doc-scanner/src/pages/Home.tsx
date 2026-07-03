@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { DocumentCard } from '../components/DocumentCard';
-import { FAB } from '../components/FAB';
+import { BottomNav } from '../components/BottomNav';
+import { SettingsModal } from '../components/SettingsModal';
 import { PinModal } from '../components/PinModal';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -40,6 +41,9 @@ export default function Home() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [inputValue, setInputValue] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const folderTabsRef = useRef<HTMLDivElement>(null);
 
   // PIN modal state
   const [pinModalOpen, setPinModalOpen] = useState(false);
@@ -273,7 +277,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-28">
+    <div className="min-h-screen bg-background pb-32">
       {/* Header */}
       <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border">
         <div className="flex items-center justify-between px-4 pt-3 pb-2">
@@ -348,6 +352,7 @@ export default function Home() {
         <div className="relative px-4 pb-2">
           <Search className="absolute left-7 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
+            ref={searchInputRef}
             placeholder="Search documents…"
             className="pl-9 bg-card border-border h-9 text-sm"
             value={search}
@@ -357,7 +362,7 @@ export default function Home() {
 
         {/* Folder Tabs */}
         {folders.length > 0 && (
-          <div className="flex gap-1.5 px-4 pb-2 overflow-x-auto no-scrollbar">
+          <div ref={folderTabsRef} className="flex gap-1.5 px-4 pb-2 overflow-x-auto no-scrollbar">
             <FolderTab
               label="All" active={activeFolder === null}
               count={state.documents.length} onClick={() => setActiveFolder(null)}
@@ -410,7 +415,22 @@ export default function Home() {
         )}
       </main>
 
-      {!selectionMode && <FAB />}
+      {!selectionMode && (
+        <BottomNav
+          onSearchClick={() => searchInputRef.current?.focus()}
+          onFoldersClick={() => {
+            if (folders.length === 0) {
+              setInputValue('');
+              setDialogMode({ kind: 'new-folder' });
+            } else {
+              folderTabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }}
+          onSettingsClick={() => setSettingsOpen(true)}
+        />
+      )}
+
+      <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       {/* PIN Modal */}
       <PinModal
