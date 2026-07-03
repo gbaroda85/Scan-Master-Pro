@@ -73,13 +73,55 @@ function orderCorners(corners: Corner[]): Corner[] {
   return [top[0], top[1], bottom[1], bottom[0]]; // tl, tr, br, bl
 }
 
+function dist(a: Corner, b: Corner): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * Derives an output size that preserves the *actual* aspect ratio and native
+ * resolution of the detected document quadrilateral, instead of forcing every
+ * scan into a fixed A4-portrait box. Forcing a fixed box squished/stretched
+ * documents whose real shape wasn't A4 portrait (e.g. landscape sheets),
+ * badly degrading legibility.
+ */
+function computeTargetSize(corners: Corner[]): { width: number; height: number } {
+  const topW = dist(corners[0], corners[1]);
+  const bottomW = dist(corners[3], corners[2]);
+  const leftH = dist(corners[0], corners[3]);
+  const rightH = dist(corners[1], corners[2]);
+
+  let width = Math.round((topW + bottomW) / 2);
+  let height = Math.round((leftH + rightH) / 2);
+
+  const MIN_DIM = 700;
+  const MAX_DIM = 2200;
+  const longest = Math.max(width, height, 1);
+
+  if (longest > MAX_DIM) {
+    const s = MAX_DIM / longest;
+    width = Math.round(width * s);
+    height = Math.round(height * s);
+  } else if (longest < MIN_DIM) {
+    const s = MIN_DIM / longest;
+    width = Math.round(width * s);
+    height = Math.round(height * s);
+  }
+
+  return { width: Math.max(1, width), height: Math.max(1, height) };
+}
+
 export async function applyPerspectiveTransform(
   sourceCanvas: HTMLCanvasElement,
   corners: Corner[],  // tl, tr, br, bl in source image coords
-  targetWidth = 794,  // A4 at 96dpi
-  targetHeight = 1123
+  targetWidth?: number,
+  targetHeight?: number
 ): Promise<string> {
   const cv = (window as any).cv;
+  if (targetWidth === undefined || targetHeight === undefined) {
+    const size = computeTargetSize(corners);
+    targetWidth = targetWidth ?? size.width;
+    targetHeight = targetHeight ?? size.height;
+  }
   const src = cv.imread(sourceCanvas);
   const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
     corners[0].x, corners[0].y,
